@@ -1,55 +1,280 @@
-# Joget
+/*
+MIT License
 
-**Joget** is a next generation **open source no-code / low-code application platform** for faster, simpler digital transformation (DX).
+Copyright (c) 2019, 2020, 2021 Steve-Mcl
 
-Joget combines the best of **rapid application development**, **business process automation** and **workflow management** in a simple, flexible and open platform. Business and technical teams can collaborate to rapidly build full-fledged enterprise applications visually, anywhere, anytime.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-- Web-based visual approach empowers non-coders to build and maintain apps anytime, anywhere
-- Reduces time to market, from months to weeks or days
-- Apps built are mobile ready, cloud ready
-- APIs for integration and plugin architecture for extensibility
-- "App Store" for enterprise apps – Joget Marketplace
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-
-## Licensing
-
-- Joget Community Edition (CE) is licensed under the [GNU General Public License version 3](https://opensource.org/licenses/gpl-3.0).  
-- Joget Professional Edition (PE), Enterprise Edition (EE) and Large Enterprise Edition (LEE) are licensed under a [commercial EULA](https://www.joget.org/product/enterprise-eula).
-
-
-## Getting Started
-
-One of the key principles of the Joget platform is its flexibility. Many deployments options are available: 
-On-Premise, On-Demand Cloud, Docker, Kubernetes, Cloud Foundry, Certified OpenShift Operator, Red Hat Marketplace, Google Workspace Marketplace, AWS Marketplace, Azure Marketplace, Google Cloud Marketplace.
-
-- [Get Started with Joget](https://www.joget.org/get-started)
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
 
 
-## Resources
+function convertPayloadToDataArray(payload) {
+    let array = [];
+    let str = '';
 
-- [Community Q&A](https://answers.joget.org) - Ask questions, get answers, and help others.
-- [Knowledge Base](https://community.joget.org) - User and developer reference, samples and other documentation.
-- [Video Tutorials](https://www.joget.org/tutorials) - Quick overview and build your first app.
-- [Joget Academy](https://academy.joget.org) - Self-paced online learning and certification.
-- [Joget Marketplace](https://marketplace.joget.org) - Download ready made apps, plugins, templates and more.
-- [Language Translations](https://translate.joget.org) - Translations for more than 20 languages.
-- [Events](https://www.joget.com/events) - Upcoming and past Joget events & webinars.
-- [Press](https://www.joget.com/press) - Joget press releases.
-- [Reviews](https://www.joget.com/reviews) - Joget reviews and customer testimonials.
+    if (Array.isArray(payload)) {
+        return payload;
+    } if (typeof payload === 'string') {
+        str = `${payload}`;
+    } else if (typeof payload === 'number') {
+        return [payload];
+    } else if (typeof payload === 'boolean') {
+        return [payload];
+    }
 
-Follow us for the latest news and updates
+    if (str.length === 0) {
+        return null;
+    }
+    array = str.split(/\s*,\s*/);
 
-- [Twitter](https://www.twitter.com/jogetworkflow)
-- [LinkedIn](https://www.linkedin.com/company/joget)
-- [Facebook](https://www.facebook.com/jogetworkflow)
-- [YouTube](https://www.youtube.com/jogetworkflow)
+    return array;
+}
 
+function describe(host, port, options) {
+    options = options || {};
+    return `{host:'${host || ''}', port:'${port || ''}', protocol:'${options.protocol || 'udp'}', MODE:'${options.MODE}', ICF:'${options.ICF}', DNA:'${options.DNA}', DA1:'${options.DA1}', DA2:'${options.DA2}', SNA:'${options.SNA}', SA1:'${options.SA1}', SA2:'${options.SA2}'}`;
+}
 
-## Building from Source
+const clients = {};
+const fins = require('./omron-fins');
 
-To build from source, please refer to [Build Source Code](https://dev.joget.org/community/display/DX7/Joget+Open+Source).
+module.exports = {
 
+    get(node, connectionConfig) {
+        const id = connectionConfig.id;
+        let _options = { ...(connectionConfig.options || {}) };
+        let _port = parseInt(connectionConfig.port || _options.port);
+        let _host = connectionConfig.host || _options.host;
+        let _connect = connectionConfig.autoConnect == null ? true : connectionConfig.autoConnect;
 
-## Contributing
+        if (!clients[id]) {
+            clients[id] = (function (port, host, options, connect) {
 
-Joget is an open source project and if you would like to contribute, please refer to [How to Contribute](https://dev.joget.org/community/display/DX7/How-to+Contribute).
+                node.log(`Create new FinsClient. id:${id}, config: ${describe(host, port, options)}`);
+                let fins_client = fins.FinsClient(port, host, options, false);
+                let connecting = false;
+                let inhibitAutoReconnect = true;
+
+                const finsClientWrapper = {
+                    write(address, data, opts, tag) {
+                        checkConnection();
+                        const _data = convertPayloadToDataArray(data);
+                        if (!Array.isArray(_data)) {
+                            throw new Error('data is not valid');
+                        }
+                        return fins_client.write(address, _data, opts, tag);
+                    },
+                    read(address, len, opts, tag) {
+                        checkConnection();
+                        return fins_client.read(address, parseInt(len), opts, tag);
+                    },
+                    readMultiple(addresses, opts, tag) {
+                        checkConnection();
+                        return fins_client.readMultiple(addresses, opts, tag);
+                    },
+                    fill(address, value, count, opts, tag) {
+                        checkConnection();
+                        return fins_client.fill(address, value, parseInt(count), opts, tag);
+                    },
+                    transfer(srcAddress, dstAddress, count, opts, tag) {
+                        checkConnection();
+                        return fins_client.transfer(srcAddress, dstAddress, parseInt(count), opts, tag);
+                    },
+                    status(opts, tag) {
+                        checkConnection();
+                        return fins_client.status(opts, tag);
+                    },
+                    run(opts, tag) {
+                        checkConnection();
+                        return fins_client.run(opts, tag);
+                    },
+                    stop(opts, tag) {
+                        checkConnection();
+                        return fins_client.stop(opts, tag);
+                    },
+                    cpuUnitDataRead(opts, tag) {
+                        checkConnection();
+                        return fins_client.cpuUnitDataRead(opts, tag);
+                    },
+                    clockRead(opts, tag) {
+                        checkConnection();
+                        return fins_client.clockRead(opts, tag);
+                    },
+                    clockWrite(clock, opts, tag) {
+                        checkConnection();
+                        return fins_client.clockWrite(clock, opts, tag);
+                    },
+                    on(a, b) {
+                        try {
+                            fins_client.on(a, b);
+                            // eslint-disable-next-line no-empty
+                        } catch (error) { }
+                    },
+                    off(a, b) {
+                        try {
+                            fins_client.off(a, b);
+                            // eslint-disable-next-line no-empty
+                        } catch (error) { }
+                    },
+                    removeAllListeners() {
+                        try {
+                            fins_client.removeAllListeners();
+                        // eslint-disable-next-line no-empty
+                        } catch (error) { }
+                    },
+                    connect(host, port, opts) {
+                        inhibitAutoReconnect = false; //as `connect` is being called, assume the user wants the connection to auto recover.
+                        finsClientWrapper.reconnect(host, port, opts);
+                    },
+                    reconnect(host, port, opts) {
+                        if (!fins_client.connected && !connecting) {
+                            try {
+                                node.log(`Connecting id:${id}, config: ${describe(finsClientWrapper.connectionInfo.host, finsClientWrapper.connectionInfo.port, finsClientWrapper.connectionInfo.options)}`);
+                            // eslint-disable-next-line no-empty
+                            } catch (error) { }
+                            
+                            try {
+                                fins_client.connect(host, port, opts);
+                                connecting = true;
+                                finsClientWrapper.reconnectTimeOver = setTimeout(() => {
+                                    connecting = false;
+                                    finsClientWrapper.reconnectTimeOver = null;
+                                }, 8000);
+
+                            // eslint-disable-next-line no-empty
+                            } catch (error) {
+                                node.error(error)
+                            }
+                        }
+                    },
+                    disconnect() {
+                        inhibitAutoReconnect = true; //as `disconnect` is being called, assume the user wants to stay disconnected.
+                        if (fins_client) {
+                            fins_client.disconnect();
+                        }
+                        clearTimeout(finsClientWrapper.reconnectTimeOver);
+                        finsClientWrapper.reconnectTimeOver = null;
+                        connecting = false;
+                    },
+                    stringToFinsAddress(addressString) {
+                        return fins_client.stringToFinsAddress(addressString);
+                    },
+
+                    FinsAddressToString(decodedAddress, offsetWD, offsetBit) {
+                        return fins_client.FinsAddressToString(decodedAddress, offsetWD, offsetBit);
+                    },
+
+                    close() {
+                        connecting = false;
+                        if (fins_client && fins_client.connected) {
+                            node.log(`closing connection ~ ${id}`);
+                            fins_client.disconnect();
+                        }
+                    },
+
+                    get connected() {
+                        return fins_client && fins_client.connected;
+                    },
+
+                    get connectionInfo() {
+                        if(fins_client) {
+                            const info = {
+                                port: fins_client.port,
+                                host: fins_client.host,
+                                options: {...fins_client.options},
+                            }
+                            if(fins_client.protocol == "tcp") {
+                                info.options.tcp_server_node_no = fins_client.server_node_no;//DA1
+                                info.options.tcp_client_node_no = fins_client.client_node_no;//SA1
+                            }
+                            return info;
+                        }            
+                        return {}
+                    }
+                };
+
+                fins_client.on('open', () => {
+                    try {
+                        clearTimeout(finsClientWrapper.reconnectTimeOver);
+                        finsClientWrapper.reconnectTimeOver = null;
+                        clearTimeout(finsClientWrapper.reconnectTimer);
+                        connecting = false;
+                        finsClientWrapper.reconnectTimer = null;
+                        node.log(`connected ~ ${id}`);
+                        // eslint-disable-next-line no-empty
+                    } catch (error) { }
+                });
+
+                // eslint-disable-next-line no-unused-vars
+                fins_client.on('close', (err) => {
+                    try {
+                        clearTimeout(finsClientWrapper.reconnectTimeOver);
+                        finsClientWrapper.reconnectTimeOver = null;
+                        connecting = false;
+                        node.log(`connection closed ~ ${id}`);
+                        scheduleReconnect();
+                        // eslint-disable-next-line no-empty
+                    } catch (error) { }
+                });
+
+                function checkConnection() {
+                    if (!finsClientWrapper.connected) {
+                        if (!inhibitAutoReconnect && !finsClientWrapper.reconnectTimer) {
+                            scheduleReconnect();
+                        }
+                        throw new Error('not connected');
+                    }
+                }
+
+                function scheduleReconnect() {
+                    if(!connecting) {
+                        if (!finsClientWrapper.reconnectTimer && !inhibitAutoReconnect) {
+                            finsClientWrapper.reconnectTimer = setTimeout(() => {
+                                if (finsClientWrapper.reconnectTimer && !inhibitAutoReconnect) {
+                                    finsClientWrapper.reconnectTimer = null;
+                                    node.log(`Scheduled reconnect ~ ${id}`);
+                                    finsClientWrapper.reconnect();
+                                }
+                            }, 2000); // TODO: Parametrise
+                        }
+                    }
+                }
+
+                if(connect) {
+                    finsClientWrapper.connect();
+                }
+                return finsClientWrapper;
+
+            }(_port, _host, _options, _connect));
+        }
+        return clients[id];
+    },
+    close(connectionConfig) {
+        const cli = this.get(null, connectionConfig);
+        if(cli) {
+            clearTimeout(cli.reconnectTimer);
+            cli.reconnectTimer = null;
+            cli.removeAllListeners();
+            if(cli.connected) {
+                cli.close();
+            }
+        }
+        const id = connectionConfig.id;
+        delete clients[id];
+    }
+};
